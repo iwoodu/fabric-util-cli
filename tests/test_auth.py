@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from fabutil.auth import (
+    FABRIC_SCOPE,
     POWER_BI_SCOPE,
     AuthenticationError,
     acquire_access_token,
@@ -18,7 +19,7 @@ class InteractiveAuthenticationTests(unittest.TestCase):
         app.get_accounts.return_value = []
         app.acquire_token_interactive.return_value = {"access_token": "user-token"}
 
-        token = acquire_access_token("tenant-id", "client-id")
+        token = acquire_access_token("tenant-id", "client-id", POWER_BI_SCOPE)
 
         self.assertEqual(token, "user-token")
         public_client.assert_called_once_with(
@@ -42,7 +43,7 @@ class InteractiveAuthenticationTests(unittest.TestCase):
         app.get_accounts.return_value = [account]
         app.acquire_token_silent.return_value = {"access_token": "cached-token"}
 
-        token = acquire_access_token("tenant-id", "client-id")
+        token = acquire_access_token("tenant-id", "client-id", POWER_BI_SCOPE)
 
         self.assertEqual(token, "cached-token")
         app.acquire_token_silent.assert_called_once_with(
@@ -61,7 +62,7 @@ class InteractiveAuthenticationTests(unittest.TestCase):
         app.acquire_token_silent.return_value = None
         app.acquire_token_interactive.return_value = {"access_token": "new-token"}
 
-        token = acquire_access_token("tenant-id", "client-id")
+        token = acquire_access_token("tenant-id", "client-id", POWER_BI_SCOPE)
 
         self.assertEqual(token, "new-token")
         app.acquire_token_interactive.assert_called_once_with(
@@ -81,7 +82,7 @@ class InteractiveAuthenticationTests(unittest.TestCase):
         ]
         app.acquire_token_interactive.return_value = {"access_token": "user-token"}
 
-        token = acquire_access_token("tenant-id", "client-id")
+        token = acquire_access_token("tenant-id", "client-id", POWER_BI_SCOPE)
 
         self.assertEqual(token, "user-token")
         app.acquire_token_silent.assert_not_called()
@@ -102,7 +103,24 @@ class InteractiveAuthenticationTests(unittest.TestCase):
         }
 
         with self.assertRaisesRegex(AuthenticationError, "User cancelled"):
-            acquire_access_token("tenant-id", "client-id")
+            acquire_access_token("tenant-id", "client-id", POWER_BI_SCOPE)
+
+    @patch("fabutil.auth.msal.PublicClientApplication")
+    @patch("fabutil.auth._create_token_cache", return_value="token-cache")
+    def test_requests_fabric_tenant_scope(
+        self, _create_token_cache: Mock, public_client: Mock
+    ) -> None:
+        app = public_client.return_value
+        app.get_accounts.return_value = []
+        app.acquire_token_interactive.return_value = {"access_token": "fabric-token"}
+
+        token = acquire_access_token("tenant-id", "client-id", FABRIC_SCOPE)
+
+        self.assertEqual(token, "fabric-token")
+        app.acquire_token_interactive.assert_called_once_with(
+            scopes=[FABRIC_SCOPE],
+            prompt="select_account",
+        )
 
 
 if __name__ == "__main__":

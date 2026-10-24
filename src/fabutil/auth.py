@@ -12,6 +12,7 @@ class AuthenticationError(Exception):
 
 
 POWER_BI_SCOPE = "https://analysis.windows.net/powerbi/api/Tenant.Read.All"
+FABRIC_SCOPE = "https://api.fabric.microsoft.com/Tenant.Read.All"
 
 
 def _create_token_cache() -> PersistedTokenCache:
@@ -24,7 +25,7 @@ def _create_token_cache() -> PersistedTokenCache:
     )
 
 
-def acquire_access_token(tenant_id: str, client_id: str) -> str:
+def acquire_access_token(tenant_id: str, client_id: str, scope: str) -> str:
     app = msal.PublicClientApplication(
         client_id=client_id,
         authority=f"https://login.microsoftonline.com/{tenant_id}",
@@ -33,13 +34,13 @@ def acquire_access_token(tenant_id: str, client_id: str) -> str:
     accounts = app.get_accounts()
     account = accounts[0] if len(accounts) == 1 else None
     if account is not None:
-        result = app.acquire_token_silent(scopes=[POWER_BI_SCOPE], account=account)
+        result = app.acquire_token_silent(scopes=[scope], account=account)
     else:
         result = None
 
     if not result or not result.get("access_token"):
         result = app.acquire_token_interactive(
-            scopes=[POWER_BI_SCOPE],
+            scopes=[scope],
             prompt="select_account",
         )
 

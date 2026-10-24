@@ -74,9 +74,10 @@ secret is created or used.
    This is a desktop/public-client redirect, not a **Web** redirect. MSAL
    listens on a temporary localhost port during sign-in; register `http://localhost`
    without a port.
-3. Under **API permissions**, add **Power BI Service** >
-   **Delegated permissions** > `Tenant.Read.All`, then have an administrator
-   grant consent.
+3. Under **API permissions**, add **Microsoft Fabric** >
+   **Delegated permissions** > `Tenant.Read.All`. Also add **Power BI Service**
+   > **Delegated permissions** > `Tenant.Read.All` to support capacity listing
+   and capacity-name lookup. Have an administrator grant consent for both.
 4. Install Python 3.10 or later and fabutil:
 
    ```sh
@@ -132,6 +133,25 @@ Filtering is left to a downstream pipe tool unless a future API operation
 supports server-side filtering. Fabric REST APIs are preferred for operations
 they support; the Power BI Admin API is used here because it supports this
 tenant-wide capacity data.
+
+## List workspaces assigned to a capacity
+
+Use the capacity's name or ID:
+
+```sh
+fabutil workspace list --capacity "Finance"
+fabutil workspace list --capacity "a0b1c2d3-e4f5-4678-9012-3456789abcde" \
+  --output json
+```
+
+Capacity names are matched exactly, without regard to case. If more than one
+capacity has that name, provide its ID instead. Name lookup uses the Power BI
+Admin API; an ID is sent directly to the Fabric Admin API. Workspaces are
+retrieved using Fabric's server-side `capacityId` filter and all response
+pages are fetched automatically. The command requires the signed-in user to be
+a Fabric administrator and the app to have delegated Fabric `Tenant.Read.All`
+permission with admin consent. To resolve a name, the app also needs delegated
+Power BI Service `Tenant.Read.All` permission.
 
 ## Development
 

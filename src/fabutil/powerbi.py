@@ -30,3 +30,22 @@ def list_tenant_capacities(access_token: str) -> list[dict[str, object]]:
     if not isinstance(capacities, list):
         raise PowerBIAPIError("Power BI API response did not contain a capacity list.")
     return capacities
+
+
+def resolve_capacity_id(access_token: str, capacity_name: str) -> str:
+    capacities = list_tenant_capacities(access_token)
+    matching_ids = [
+        capacity.get("id")
+        for capacity in capacities
+        if isinstance(capacity, dict)
+        and isinstance(capacity.get("displayName"), str)
+        and capacity["displayName"].casefold() == capacity_name.casefold()
+        and isinstance(capacity.get("id"), str)
+    ]
+    if not matching_ids:
+        raise PowerBIAPIError(f"No capacity named '{capacity_name}' was found.")
+    if len(matching_ids) > 1:
+        raise PowerBIAPIError(
+            f"More than one capacity is named '{capacity_name}'; use its capacity ID."
+        )
+    return matching_ids[0]
