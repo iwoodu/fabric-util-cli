@@ -19,8 +19,12 @@ from fabutil.auth import (
 )
 from fabutil.fabric import (
     FabricAPIError,
+    get_tenant_settings,
     list_admin_items,
     list_capacity_workspaces,
+    list_capacity_tenant_setting_overrides,
+    list_domain_tenant_setting_overrides,
+    list_workspace_tenant_setting_overrides,
     resolve_admin_workspace_id,
 )
 from fabutil.powerbi import (
@@ -144,6 +148,42 @@ def _build_parser() -> argparse.ArgumentParser:
         default="table",
         help="Output format (default: table).",
     )
+    tenant_parser = groups.add_parser(
+        "tenant", help="Manage tenant settings."
+    )
+    tenant_commands = tenant_parser.add_subparsers(
+        dest="command", required=True
+    )
+    tenant_commands.add_parser(
+        "settings", help="Get tenant settings and their details."
+    )
+    tenant_settings_parser = tenant_commands.choices["settings"]
+    _add_auth_arguments(tenant_settings_parser)
+    tenant_settings_parser.add_argument(
+        "--output",
+        choices=("table", "json"),
+        default="table",
+        help="Output format (default: table).",
+    )
+    tenant_overrides_parser = tenant_commands.add_parser(
+        "overrides",
+        help="List capacity and domain tenant setting overrides.",
+    )
+    _add_auth_arguments(tenant_overrides_parser)
+    tenant_overrides_parser.add_argument(
+        "--scope",
+        choices=("capacity", "domain", "workspace"),
+        help=(
+            "Restrict results to capacity, domain, or workspace overrides "
+            "(default: all scopes)."
+        ),
+    )
+    tenant_overrides_parser.add_argument(
+        "--output",
+        choices=("table", "json"),
+        default="table",
+        help="Output format (default: table).",
+    )
     return parser
 
 
@@ -218,6 +258,67 @@ def _format_item_table(items: list[dict[str, object]]) -> str:
         [str(item.get(column) or "-") for column in columns]
         for item in items
     ]
+    widths = [
+        max([len(header), *(len(row[index]) for row in rows)])
+        for index, header in enumerate(headers)
+    ]
+    lines = [
+        "  ".join(header.ljust(widths[index]) for index, header in enumerate(headers)),
+        "  ".join("-" * width for width in widths),
+    ]
+    lines.extend(
+        "  ".join(value.ljust(widths[index]) for index, value in enumerate(row))
+        for row in rows
+    )
+    return "\n".join(lines)
+
+
+def _format_tenant_settings_table(
+    settings: list[dict[str, object]],
+) -> str:
+    rows = [
+        [
+            str(setting.get("settingName") or "-"),
+            str(setting.get("enabled") if "enabled" in setting else "-"),
+            json.dumps(
+                {
+                    key: value
+                    for key, value in setting.items()
+                    if key not in ("settingName", "enabled")
+                },
+                sort_keys=True,
+            ),
+        ]
+        for setting in settings
+    ]
+    headers = ("SETTING", "ENABLED", "DETAILS")
+    widths = [
+        max([len(header), *(len(row[index]) for row in rows)])
+        for index, header in enumerate(headers)
+    ]
+    lines = [
+        "  ".join(header.ljust(widths[index]) for index, header in enumerate(headers)),
+        "  ".join("-" * width for width in widths),
+    ]
+    lines.extend(
+        "  ".join(value.ljust(widths[index]) for index, value in enumerate(row))
+        for row in rows
+    )
+    return "\n".join(lines)
+
+
+def _format_tenant_overrides_table(
+    overrides: list[dict[str, object]],
+) -> str:
+    rows = [
+        [
+            str(override.get("scope") or "-"),
+            str(override.get("id") or "-"),
+            json.dumps(override.get("tenantSettings", []), sort_keys=True),
+        ]
+        for override in overrides
+    ]
+    headers = ("SCOPE", "ID", "TENANT SETTINGS OVERRIDES")
     widths = [
         max([len(header), *(len(row[index]) for row in rows)])
         for index, header in enumerate(headers)
@@ -362,6 +463,44 @@ def main(argv: Sequence[str] | None = None) -> int:
                 capacity=args.capacity,
                 status=args.status,
             )
+        elif args.command_group == "tenant":
+            access_token = acquire_access_token(
+                args.tenant_id, args.client_id, FABRIC_SCOPE
+            )
+            if args.command == "settings":
+                tenant_settings = get_tenant_settings(access_token)
+            else:
+                tenant_overrides = []
+                if args.scope in (None, "capacity"):
+                    tenant_overrides.extend(
+                        {
+                            **override,
+                            "scope": "capacity",
+                        }
+                        for override in list_capacity_tenant_setting_overrides(
+                            access_token
+                        )
+                    )
+                if args.scope in (None, "domain"):
+                    tenant_overrides.extend(
+                        {
+                            **override,
+                            "scope": "domain",
+                        }
+                        for override in list_domain_tenant_setting_overrides(
+                            access_token
+                        )
+                    )
+                if args.scope in (None, "workspace"):
+                    tenant_overrides.extend(
+                        {
+                            **override,
+                            "scope": "workspace",
+                        }
+                        for override in list_workspace_tenant_setting_overrides(
+                            access_token
+                        )
+                    )
         else:
             capacity_id = None
             if args.capacity:
@@ -420,6 +559,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         output_rows = workspaces
     elif args.command_group == "item":
         output_rows = items
+    elif args.command_group == "tenant":
+        output_rows = (
+            tenant_settings
+            if args.command == "settings"
+            else tenant_overrides
+        )
 
     if args.output == "json":
         if args.command_group == "refreshable":
@@ -429,6 +574,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         _print_table(_format_workspace_table(workspaces))
     elif args.command_group == "item":
         _print_table(_format_item_table(items))
+    elif args.command_group == "tenant":
+        if args.command == "settings":
+            _print_table(_format_tenant_settings_table(tenant_settings))
+        else:
+            _print_table(_format_tenant_overrides_table(tenant_overrides))
     elif args.command_group == "refreshable":
         _print_table(_format_refreshables_table(output_rows, args.time_zone))
     else:

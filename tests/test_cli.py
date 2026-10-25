@@ -297,6 +297,318 @@ class ItemListCommandTests(unittest.TestCase):
         )
 
 
+class TenantSettingsCommandTests(unittest.TestCase):
+    @patch("fabutil.cli.get_tenant_settings")
+    @patch("fabutil.cli.acquire_access_token", return_value="fabric-admin-token")
+    def test_gets_tenant_settings_as_json(
+        self, acquire_token: Mock, get_settings: Mock
+    ) -> None:
+        settings = [
+            {
+                "settingName": "Users can create Fabric items",
+                "enabled": True,
+                "canSpecifySecurityGroups": True,
+                "enabledSecurityGroups": [{"graphId": "group-id", "name": "Admins"}],
+            }
+        ]
+        get_settings.return_value = settings
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            result = main(
+                [
+                    "tenant",
+                    "settings",
+                    "--tenant-id",
+                    "tenant-id",
+                    "--client-id",
+                    "client-id",
+                    "--output",
+                    "json",
+                ]
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(json.loads(stdout.getvalue()), settings)
+        acquire_token.assert_called_once_with(
+            "tenant-id", "client-id", FABRIC_SCOPE
+        )
+        get_settings.assert_called_once_with("fabric-admin-token")
+
+    @patch("fabutil.cli.get_tenant_settings")
+    @patch("fabutil.cli.acquire_access_token", return_value="fabric-admin-token")
+    def test_table_includes_setting_details(
+        self, _acquire_token: Mock, get_settings: Mock
+    ) -> None:
+        get_settings.return_value = [
+            {
+                "settingName": "Users can create Fabric items",
+                "enabled": True,
+                "canSpecifySecurityGroups": True,
+                "enabledSecurityGroups": [{"graphId": "group-id", "name": "Admins"}],
+            }
+        ]
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            result = main(
+                [
+                    "tenant",
+                    "settings",
+                    "--tenant-id",
+                    "tenant-id",
+                    "--client-id",
+                    "client-id",
+                ]
+            )
+
+        self.assertEqual(result, 0)
+        self.assertIn("Users can create Fabric items", stdout.getvalue())
+        self.assertIn('"canSpecifySecurityGroups": true', stdout.getvalue())
+        self.assertIn('"name": "Admins"', stdout.getvalue())
+
+
+class TenantOverridesCommandTests(unittest.TestCase):
+    @patch("fabutil.cli.list_domain_tenant_setting_overrides", return_value=[])
+    @patch("fabutil.cli.list_workspace_tenant_setting_overrides", return_value=[])
+    @patch("fabutil.cli.list_capacity_tenant_setting_overrides")
+    @patch("fabutil.cli.acquire_access_token", return_value="fabric-admin-token")
+    def test_lists_capacity_overrides_as_json(
+        self,
+        acquire_token: Mock,
+        list_overrides: Mock,
+        list_workspace_overrides: Mock,
+        list_domain_overrides: Mock,
+    ) -> None:
+        overrides = [
+            {
+                "id": CAPACITY_ID,
+                "scope": "capacity",
+                "tenantSettings": [
+                    {
+                        "settingName": "TenantSettingForCapacityDelegatedSwitch",
+                        "enabled": True,
+                        "delegatedFrom": "Tenant",
+                    }
+                ],
+            }
+        ]
+        list_overrides.return_value = overrides
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            result = main(
+                [
+                    "tenant",
+                    "overrides",
+                    "--scope",
+                    "capacity",
+                    "--tenant-id",
+                    "tenant-id",
+                    "--client-id",
+                    "client-id",
+                    "--output",
+                    "json",
+                ]
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(json.loads(stdout.getvalue()), overrides)
+        acquire_token.assert_called_once_with(
+            "tenant-id", "client-id", FABRIC_SCOPE
+        )
+        list_overrides.assert_called_once_with("fabric-admin-token")
+        list_workspace_overrides.assert_not_called()
+        list_domain_overrides.assert_not_called()
+
+    @patch("fabutil.cli.list_domain_tenant_setting_overrides")
+    @patch("fabutil.cli.list_workspace_tenant_setting_overrides")
+    @patch("fabutil.cli.list_capacity_tenant_setting_overrides")
+    @patch("fabutil.cli.acquire_access_token", return_value="fabric-admin-token")
+    def test_table_includes_capacity_and_override_details(
+        self,
+        _acquire_token: Mock,
+        list_overrides: Mock,
+        list_workspace_overrides: Mock,
+        list_domain_overrides: Mock,
+    ) -> None:
+        list_overrides.return_value = [
+            {
+                "id": CAPACITY_ID,
+                "tenantSettings": [
+                    {
+                        "settingName": "TenantSettingForCapacityDelegatedSwitch",
+                        "enabled": True,
+                        "delegatedFrom": "Tenant",
+                    }
+                ],
+            }
+        ]
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            result = main(
+                [
+                    "tenant",
+                    "overrides",
+                    "--scope",
+                    "capacity",
+                    "--tenant-id",
+                    "tenant-id",
+                    "--client-id",
+                    "client-id",
+                ]
+            )
+
+        self.assertEqual(result, 0)
+        self.assertIn(CAPACITY_ID, stdout.getvalue())
+        self.assertIn("capacity", stdout.getvalue())
+        self.assertIn("TenantSettingForCapacityDelegatedSwitch", stdout.getvalue())
+        self.assertIn('"delegatedFrom": "Tenant"', stdout.getvalue())
+        list_domain_overrides.assert_not_called()
+        list_workspace_overrides.assert_not_called()
+
+    @patch(
+        "fabutil.cli.list_domain_tenant_setting_overrides",
+        return_value=[{"id": "domain-id", "tenantSettings": []}],
+    )
+    @patch(
+        "fabutil.cli.list_workspace_tenant_setting_overrides",
+        return_value=[{"id": "workspace-id", "tenantSettings": []}],
+    )
+    @patch(
+        "fabutil.cli.list_capacity_tenant_setting_overrides",
+        return_value=[{"id": CAPACITY_ID, "tenantSettings": []}],
+    )
+    @patch("fabutil.cli.acquire_access_token", return_value="fabric-admin-token")
+    def test_lists_both_override_scopes_by_default_as_json(
+        self,
+        acquire_token: Mock,
+        list_capacity_overrides: Mock,
+        list_workspace_overrides: Mock,
+        list_domain_overrides: Mock,
+    ) -> None:
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            result = main(
+                [
+                    "tenant",
+                    "overrides",
+                    "--tenant-id",
+                    "tenant-id",
+                    "--client-id",
+                    "client-id",
+                    "--output",
+                    "json",
+                ]
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(
+            json.loads(stdout.getvalue()),
+            [
+                {"id": CAPACITY_ID, "tenantSettings": [], "scope": "capacity"},
+                {"id": "domain-id", "tenantSettings": [], "scope": "domain"},
+                {"id": "workspace-id", "tenantSettings": [], "scope": "workspace"},
+            ],
+        )
+        acquire_token.assert_called_once_with(
+            "tenant-id", "client-id", FABRIC_SCOPE
+        )
+        list_capacity_overrides.assert_called_once_with("fabric-admin-token")
+        list_domain_overrides.assert_called_once_with("fabric-admin-token")
+        list_workspace_overrides.assert_called_once_with("fabric-admin-token")
+
+    @patch("fabutil.cli.list_workspace_tenant_setting_overrides")
+    @patch(
+        "fabutil.cli.list_domain_tenant_setting_overrides",
+        return_value=[{"id": "domain-id", "tenantSettings": []}],
+    )
+    @patch("fabutil.cli.list_capacity_tenant_setting_overrides")
+    @patch("fabutil.cli.acquire_access_token", return_value="fabric-admin-token")
+    def test_limits_results_to_domain_scope(
+        self,
+        _acquire_token: Mock,
+        list_capacity_overrides: Mock,
+        list_domain_overrides: Mock,
+        list_workspace_overrides: Mock,
+    ) -> None:
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            result = main(
+                [
+                    "tenant",
+                    "overrides",
+                    "--scope",
+                    "domain",
+                    "--tenant-id",
+                    "tenant-id",
+                    "--client-id",
+                    "client-id",
+                    "--output",
+                    "json",
+                ]
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(
+            json.loads(stdout.getvalue()),
+            [{"id": "domain-id", "tenantSettings": [], "scope": "domain"}],
+        )
+        list_capacity_overrides.assert_not_called()
+        list_domain_overrides.assert_called_once_with("fabric-admin-token")
+        list_workspace_overrides.assert_not_called()
+
+    @patch("fabutil.cli.list_workspace_tenant_setting_overrides")
+    @patch("fabutil.cli.list_domain_tenant_setting_overrides")
+    @patch("fabutil.cli.list_capacity_tenant_setting_overrides")
+    @patch("fabutil.cli.acquire_access_token", return_value="fabric-admin-token")
+    def test_limits_results_to_workspace_scope(
+        self,
+        _acquire_token: Mock,
+        list_capacity_overrides: Mock,
+        list_domain_overrides: Mock,
+        list_workspace_overrides: Mock,
+    ) -> None:
+        list_workspace_overrides.return_value = [
+            {"id": "workspace-id", "tenantSettings": []}
+        ]
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            result = main(
+                [
+                    "tenant",
+                    "overrides",
+                    "--scope",
+                    "workspace",
+                    "--tenant-id",
+                    "tenant-id",
+                    "--client-id",
+                    "client-id",
+                    "--output",
+                    "json",
+                ]
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(
+            json.loads(stdout.getvalue()),
+            [
+                {
+                    "id": "workspace-id",
+                    "tenantSettings": [],
+                    "scope": "workspace",
+                }
+            ],
+        )
+        list_capacity_overrides.assert_not_called()
+        list_domain_overrides.assert_not_called()
+        list_workspace_overrides.assert_called_once_with("fabric-admin-token")
+
+
 class RefreshableListCommandTests(unittest.TestCase):
     @patch("fabutil.cli.filter_refreshables")
     @patch("fabutil.cli.list_tenant_refreshables")

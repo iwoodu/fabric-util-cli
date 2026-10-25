@@ -4,6 +4,19 @@ import requests
 
 
 ADMIN_ITEMS_URL = "https://api.fabric.microsoft.com/v1/admin/items"
+ADMIN_CAPACITY_TENANT_SETTING_OVERRIDES_URL = (
+    "https://api.fabric.microsoft.com/v1/admin/capacities/"
+    "delegatedTenantSettingOverrides"
+)
+ADMIN_DOMAIN_TENANT_SETTING_OVERRIDES_URL = (
+    "https://api.fabric.microsoft.com/v1/admin/domains/"
+    "delegatedTenantSettingOverrides"
+)
+ADMIN_WORKSPACE_TENANT_SETTING_OVERRIDES_URL = (
+    "https://api.fabric.microsoft.com/v1/admin/workspaces/"
+    "delegatedTenantSettingOverrides"
+)
+ADMIN_TENANT_SETTINGS_URL = "https://api.fabric.microsoft.com/v1/admin/tenantsettings"
 ADMIN_WORKSPACES_URL = "https://api.fabric.microsoft.com/v1/admin/workspaces"
 
 
@@ -130,4 +143,46 @@ def list_admin_items(
         params["type"] = item_type
     return _list_admin_collection(
         access_token, ADMIN_ITEMS_URL, "itemEntities", params
+    )
+
+
+def get_tenant_settings(access_token: str) -> list[dict[str, object]]:
+    return _list_admin_collection(
+        access_token,
+        ADMIN_TENANT_SETTINGS_URL,
+        "value",
+        {},
+    )
+
+
+def list_capacity_tenant_setting_overrides(
+    access_token: str,
+) -> list[dict[str, object]]:
+    return _list_admin_collection(
+        access_token,
+        ADMIN_CAPACITY_TENANT_SETTING_OVERRIDES_URL,
+        "value",
+        {},
+    )
+
+
+def list_domain_tenant_setting_overrides(
+    access_token: str,
+) -> list[dict[str, object]]:
+    return _list_admin_collection(
+        access_token,
+        ADMIN_DOMAIN_TENANT_SETTING_OVERRIDES_URL,
+        "value",
+        {},
+    )
+
+
+def list_workspace_tenant_setting_overrides(
+    access_token: str,
+) -> list[dict[str, object]]:
+    return _list_admin_collection(
+        access_token,
+        ADMIN_WORKSPACE_TENANT_SETTING_OVERRIDES_URL,
+        "value",
+        {},
     )

@@ -3,10 +3,18 @@ from unittest.mock import Mock, call, patch
 
 from fabutil.fabric import (
     ADMIN_ITEMS_URL,
+    ADMIN_CAPACITY_TENANT_SETTING_OVERRIDES_URL,
+    ADMIN_DOMAIN_TENANT_SETTING_OVERRIDES_URL,
+    ADMIN_TENANT_SETTINGS_URL,
+    ADMIN_WORKSPACE_TENANT_SETTING_OVERRIDES_URL,
     ADMIN_WORKSPACES_URL,
     FabricAPIError,
+    get_tenant_settings,
     list_admin_items,
     list_admin_workspaces,
+    list_capacity_tenant_setting_overrides,
+    list_domain_tenant_setting_overrides,
+    list_workspace_tenant_setting_overrides,
     list_capacity_workspaces,
     resolve_admin_workspace_id,
 )
@@ -248,3 +256,316 @@ class ListAdminItemsTests(unittest.TestCase):
 
         with self.assertRaisesRegex(FabricAPIError, "repeated continuation token"):
             list_admin_items("fabric-token")
+
+
+class GetTenantSettingsTests(unittest.TestCase):
+    @patch("fabutil.fabric.requests.get")
+    def test_gets_tenant_settings_with_details(self, get: Mock) -> None:
+        settings = [
+            {
+                "settingName": "Users can create Fabric items",
+                "enabled": True,
+                "canSpecifySecurityGroups": True,
+                "enabledSecurityGroups": [{"graphId": "group-id", "name": "Admins"}],
+            }
+        ]
+        get.return_value = Mock(
+            ok=True,
+            json=lambda: {"value": settings},
+        )
+
+        result = get_tenant_settings("fabric-token")
+
+        self.assertEqual(result, settings)
+        get.assert_called_once_with(
+            ADMIN_TENANT_SETTINGS_URL,
+            headers={"Authorization": "Bearer fabric-token"},
+            params={},
+            timeout=30,
+        )
+
+    @patch("fabutil.fabric.requests.get")
+    def test_paginates_tenant_settings(self, get: Mock) -> None:
+        first_setting = {"settingName": "First", "enabled": True}
+        second_setting = {"settingName": "Second", "enabled": False}
+        get.side_effect = [
+            Mock(
+                ok=True,
+                json=lambda: {
+                    "value": [first_setting],
+                    "continuationToken": "next-page",
+                    "continuationUri": (
+                        "https://api.fabric.microsoft.com/v1/admin/tenantsettings"
+                        "?continuationToken=next-page"
+                    ),
+                },
+            ),
+            Mock(
+                ok=True,
+                json=lambda: {"value": [second_setting]},
+            ),
+        ]
+
+        result = get_tenant_settings("fabric-token")
+
+        self.assertEqual(result, [first_setting, second_setting])
+        self.assertEqual(
+            get.call_args_list,
+            [
+                call(
+                    ADMIN_TENANT_SETTINGS_URL,
+                    headers={"Authorization": "Bearer fabric-token"},
+                    params={},
+                    timeout=30,
+                ),
+                call(
+                    ADMIN_TENANT_SETTINGS_URL,
+                    headers={"Authorization": "Bearer fabric-token"},
+                    params={"continuationToken": "next-page"},
+                    timeout=30,
+                ),
+            ],
+        )
+
+    @patch("fabutil.fabric.requests.get")
+    def test_reports_http_errors(self, get: Mock) -> None:
+        get.return_value = Mock(ok=False, status_code=403, text="Forbidden")
+
+        with self.assertRaisesRegex(FabricAPIError, "HTTP 403"):
+            get_tenant_settings("fabric-token")
+
+    @patch("fabutil.fabric.requests.get")
+    def test_rejects_invalid_json(self, get: Mock) -> None:
+        get.return_value = Mock(
+            ok=True,
+            json=Mock(side_effect=ValueError("invalid JSON")),
+        )
+
+        with self.assertRaisesRegex(FabricAPIError, "invalid JSON"):
+            get_tenant_settings("fabric-token")
+
+    @patch("fabutil.fabric.requests.get")
+    def test_rejects_invalid_settings_payload(self, get: Mock) -> None:
+        get.return_value = Mock(ok=True, json=lambda: {"value": {}})
+
+        with self.assertRaisesRegex(FabricAPIError, "value list"):
+            get_tenant_settings("fabric-token")
+
+
+class ListCapacityTenantSettingOverridesTests(unittest.TestCase):
+    @patch("fabutil.fabric.requests.get")
+    def test_lists_overrides_with_all_nested_details(self, get: Mock) -> None:
+        overrides = [
+            {
+                "id": CAPACITY_ID,
+                "tenantSettings": [
+                    {
+                        "settingName": "TenantSettingForCapacityDelegatedSwitch",
+                        "enabled": True,
+                        "delegatedFrom": "Tenant",
+                        "properties": [
+                            {"name": "sample", "value": "5", "type": "Integer"}
+                        ],
+                    }
+                ],
+            }
+        ]
+        get.return_value = Mock(
+            ok=True,
+            json=lambda: {"value": overrides},
+        )
+
+        result = list_capacity_tenant_setting_overrides("fabric-token")
+
+        self.assertEqual(result, overrides)
+        get.assert_called_once_with(
+            ADMIN_CAPACITY_TENANT_SETTING_OVERRIDES_URL,
+            headers={"Authorization": "Bearer fabric-token"},
+            params={},
+            timeout=30,
+        )
+
+    @patch("fabutil.fabric.requests.get")
+    def test_paginates_overrides(self, get: Mock) -> None:
+        first = {"id": "capacity-one", "tenantSettings": []}
+        second = {"id": "capacity-two", "tenantSettings": []}
+        get.side_effect = [
+            Mock(
+                ok=True,
+                json=lambda: {
+                    "value": [first],
+                    "continuationToken": "next-page",
+                },
+            ),
+            Mock(
+                ok=True,
+                json=lambda: {"value": [second]},
+            ),
+        ]
+
+        result = list_capacity_tenant_setting_overrides("fabric-token")
+
+        self.assertEqual(result, [first, second])
+        self.assertEqual(
+            get.call_args_list,
+            [
+                call(
+                    ADMIN_CAPACITY_TENANT_SETTING_OVERRIDES_URL,
+                    headers={"Authorization": "Bearer fabric-token"},
+                    params={},
+                    timeout=30,
+                ),
+                call(
+                    ADMIN_CAPACITY_TENANT_SETTING_OVERRIDES_URL,
+                    headers={"Authorization": "Bearer fabric-token"},
+                    params={"continuationToken": "next-page"},
+                    timeout=30,
+                ),
+            ],
+        )
+
+    @patch("fabutil.fabric.requests.get")
+    def test_reports_http_errors(self, get: Mock) -> None:
+        get.return_value = Mock(ok=False, status_code=403, text="Forbidden")
+
+        with self.assertRaisesRegex(FabricAPIError, "HTTP 403"):
+            list_capacity_tenant_setting_overrides("fabric-token")
+
+    @patch("fabutil.fabric.requests.get")
+    def test_rejects_invalid_payload(self, get: Mock) -> None:
+        get.return_value = Mock(ok=True, json=lambda: {"value": "invalid"})
+
+        with self.assertRaisesRegex(FabricAPIError, "value list"):
+            list_capacity_tenant_setting_overrides("fabric-token")
+
+
+class ListDomainTenantSettingOverridesTests(unittest.TestCase):
+    @patch("fabutil.fabric.requests.get")
+    def test_lists_domain_overrides_with_details(self, get: Mock) -> None:
+        overrides = [
+            {
+                "id": "domain-id",
+                "tenantSettings": [
+                    {
+                        "settingName": "DomainSetting",
+                        "enabled": True,
+                        "delegatedFrom": "Tenant",
+                    }
+                ],
+            }
+        ]
+        get.return_value = Mock(ok=True, json=lambda: {"value": overrides})
+
+        result = list_domain_tenant_setting_overrides("fabric-token")
+
+        self.assertEqual(result, overrides)
+        get.assert_called_once_with(
+            ADMIN_DOMAIN_TENANT_SETTING_OVERRIDES_URL,
+            headers={"Authorization": "Bearer fabric-token"},
+            params={},
+            timeout=30,
+        )
+
+    @patch("fabutil.fabric.requests.get")
+    def test_paginates_domain_overrides(self, get: Mock) -> None:
+        first = {"id": "domain-one", "tenantSettings": []}
+        second = {"id": "domain-two", "tenantSettings": []}
+        get.side_effect = [
+            Mock(
+                ok=True,
+                json=lambda: {
+                    "value": [first],
+                    "continuationToken": "next-page",
+                },
+            ),
+            Mock(ok=True, json=lambda: {"value": [second]}),
+        ]
+
+        self.assertEqual(
+            list_domain_tenant_setting_overrides("fabric-token"),
+            [first, second],
+        )
+        self.assertEqual(
+            get.call_args_list[1].kwargs["params"],
+            {"continuationToken": "next-page"},
+        )
+
+    @patch("fabutil.fabric.requests.get")
+    def test_reports_http_errors(self, get: Mock) -> None:
+        get.return_value = Mock(ok=False, status_code=403, text="Forbidden")
+
+        with self.assertRaisesRegex(FabricAPIError, "HTTP 403"):
+            list_domain_tenant_setting_overrides("fabric-token")
+
+    @patch("fabutil.fabric.requests.get")
+    def test_rejects_invalid_payload(self, get: Mock) -> None:
+        get.return_value = Mock(ok=True, json=lambda: {"value": None})
+
+        with self.assertRaisesRegex(FabricAPIError, "value list"):
+            list_domain_tenant_setting_overrides("fabric-token")
+
+
+class ListWorkspaceTenantSettingOverridesTests(unittest.TestCase):
+    @patch("fabutil.fabric.requests.get")
+    def test_lists_workspace_overrides_with_details(self, get: Mock) -> None:
+        overrides = [
+            {
+                "id": "workspace-id",
+                "tenantSettings": [
+                    {
+                        "settingName": "WorkspaceSetting",
+                        "enabled": True,
+                        "delegatedFrom": "Tenant",
+                    }
+                ],
+            }
+        ]
+        get.return_value = Mock(ok=True, json=lambda: {"value": overrides})
+
+        result = list_workspace_tenant_setting_overrides("fabric-token")
+
+        self.assertEqual(result, overrides)
+        get.assert_called_once_with(
+            ADMIN_WORKSPACE_TENANT_SETTING_OVERRIDES_URL,
+            headers={"Authorization": "Bearer fabric-token"},
+            params={},
+            timeout=30,
+        )
+
+    @patch("fabutil.fabric.requests.get")
+    def test_paginates_workspace_overrides(self, get: Mock) -> None:
+        first = {"id": "workspace-one", "tenantSettings": []}
+        second = {"id": "workspace-two", "tenantSettings": []}
+        get.side_effect = [
+            Mock(
+                ok=True,
+                json=lambda: {
+                    "value": [first],
+                    "continuationToken": "next-page",
+                },
+            ),
+            Mock(ok=True, json=lambda: {"value": [second]}),
+        ]
+
+        self.assertEqual(
+            list_workspace_tenant_setting_overrides("fabric-token"),
+            [first, second],
+        )
+        self.assertEqual(
+            get.call_args_list[1].kwargs["params"],
+            {"continuationToken": "next-page"},
+        )
+
+    @patch("fabutil.fabric.requests.get")
+    def test_reports_http_errors(self, get: Mock) -> None:
+        get.return_value = Mock(ok=False, status_code=403, text="Forbidden")
+
+        with self.assertRaisesRegex(FabricAPIError, "HTTP 403"):
+            list_workspace_tenant_setting_overrides("fabric-token")
+
+    @patch("fabutil.fabric.requests.get")
+    def test_rejects_invalid_payload(self, get: Mock) -> None:
+        get.return_value = Mock(ok=True, json=lambda: {"value": None})
+
+        with self.assertRaisesRegex(FabricAPIError, "value list"):
+            list_workspace_tenant_setting_overrides("fabric-token")

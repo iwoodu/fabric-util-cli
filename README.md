@@ -52,6 +52,47 @@ fabutil capacity list --output json `
   | Format-Table displayName, sku, state, region, id -AutoSize
 ```
 
+## Get tenant settings
+
+Retrieve all Fabric tenant settings with their details:
+
+```sh
+fabutil tenant settings
+fabutil tenant settings --output json
+```
+
+The command calls Fabric Admin `GET /v1/admin/tenantsettings`. It requires the
+signed-in user to be a Fabric administrator and the app to have delegated
+Fabric `Tenant.Read.All` permission with admin consent. JSON output includes
+all fields returned by the API; table output shows each setting, whether it is
+enabled, and the remaining setting details. The command follows continuation
+tokens automatically to retrieve all settings.
+
+## Get tenant setting overrides
+
+List capacity, domain, and workspace tenant setting overrides, or restrict
+the results to one scope:
+
+```sh
+fabutil tenant overrides
+fabutil tenant overrides --scope capacity
+fabutil tenant overrides --scope domain
+fabutil tenant overrides --scope workspace
+fabutil tenant overrides --output json
+```
+
+By default, the command calls these Fabric Admin endpoints:
+[`List Capacities Tenant Settings Overrides`](https://learn.microsoft.com/en-us/rest/api/fabric/admin/tenants/list-capacities-tenant-settings-overrides),
+`GET /v1/admin/domains/delegatedTenantSettingOverrides`, and
+[`List Workspaces Tenant Settings Overrides`](https://learn.microsoft.com/en-us/rest/api/fabric/admin/tenants/list-workspaces-tenant-settings-overrides).
+Use `--scope capacity`, `--scope domain`, or `--scope workspace` to call only
+one endpoint. These APIs require a Fabric Service Administrator and delegated
+Fabric `Tenant.Read.All` or `Tenant.ReadWrite.All` permission. All pages are
+fetched automatically (up to 10,000 records per request). JSON output
+preserves each resource ID and its complete `tenantSettings` details, and adds
+a `scope` field (`capacity`, `domain`, or `workspace`) to identify the
+resource type. Table output shows the scope, ID, and setting details.
+
 ## Configure interactive user sign-in
 
 The Azure CLI login attempt fails with `AADSTS65002` because Azure CLI uses a
@@ -129,6 +170,8 @@ this native-client sign-in.
   delegated access token, silently reusing an encrypted persistent cache when
   a single account is cached.
 - `powerbi.py` sends that token to `GET /v1.0/myorg/admin/capacities`.
+- `fabric.py` sends the Fabric token to `GET /v1/admin/tenantsettings` for
+  `tenant settings`.
 
 Filtering is left to a downstream pipe tool unless a future API operation
 supports server-side filtering. Fabric REST APIs are preferred for operations
