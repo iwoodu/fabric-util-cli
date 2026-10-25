@@ -154,12 +154,17 @@ def _build_parser() -> argparse.ArgumentParser:
     tenant_commands = tenant_parser.add_subparsers(
         dest="command", required=True
     )
-    tenant_commands.add_parser(
+    tenant_settings_parser = tenant_commands.add_parser(
         "settings", help="Get tenant settings and their details."
     )
-    tenant_settings_parser = tenant_commands.choices["settings"]
-    _add_auth_arguments(tenant_settings_parser)
-    tenant_settings_parser.add_argument(
+    tenant_settings_commands = tenant_settings_parser.add_subparsers(
+        dest="subcommand", required=True
+    )
+    tenant_settings_list_parser = tenant_settings_commands.add_parser(
+        "list", help="List tenant settings and their details."
+    )
+    _add_auth_arguments(tenant_settings_list_parser)
+    tenant_settings_list_parser.add_argument(
         "--output",
         choices=("table", "json"),
         default="table",
@@ -169,8 +174,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "overrides",
         help="List capacity and domain tenant setting overrides.",
     )
-    _add_auth_arguments(tenant_overrides_parser)
-    tenant_overrides_parser.add_argument(
+    tenant_overrides_commands = tenant_overrides_parser.add_subparsers(
+        dest="subcommand", required=True
+    )
+    tenant_overrides_list_parser = tenant_overrides_commands.add_parser(
+        "list", help="List tenant setting overrides."
+    )
+    _add_auth_arguments(tenant_overrides_list_parser)
+    tenant_overrides_list_parser.add_argument(
         "--scope",
         choices=("capacity", "domain", "workspace"),
         help=(
@@ -178,7 +189,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "(default: all scopes)."
         ),
     )
-    tenant_overrides_parser.add_argument(
+    tenant_overrides_list_parser.add_argument(
         "--output",
         choices=("table", "json"),
         default="table",

@@ -6,6 +6,7 @@ from unittest.mock import Mock, call, patch
 
 from fabutil.auth import FABRIC_SCOPE, POWER_BI_SCOPE
 from fabutil.cli import (
+    _build_parser,
     _format_refreshables_table,
     _format_timestamp,
     main,
@@ -13,6 +14,16 @@ from fabutil.cli import (
 
 
 CAPACITY_ID = "a0b1c2d3-e4f5-4678-9012-3456789abcde"
+
+
+class TenantCommandParserTests(unittest.TestCase):
+    def test_settings_and_overrides_require_list_subcommand(self) -> None:
+        parser = _build_parser()
+        for command in ("settings", "overrides"):
+            with self.subTest(command=command):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit):
+                        parser.parse_args(["tenant", command])
 
 
 class CapacityListCommandTests(unittest.TestCase):
@@ -319,6 +330,7 @@ class TenantSettingsCommandTests(unittest.TestCase):
                 [
                     "tenant",
                     "settings",
+                    "list",
                     "--tenant-id",
                     "tenant-id",
                     "--client-id",
@@ -355,6 +367,7 @@ class TenantSettingsCommandTests(unittest.TestCase):
                 [
                     "tenant",
                     "settings",
+                    "list",
                     "--tenant-id",
                     "tenant-id",
                     "--client-id",
@@ -401,6 +414,7 @@ class TenantOverridesCommandTests(unittest.TestCase):
                 [
                     "tenant",
                     "overrides",
+                    "list",
                     "--scope",
                     "capacity",
                     "--tenant-id",
@@ -451,6 +465,7 @@ class TenantOverridesCommandTests(unittest.TestCase):
                 [
                     "tenant",
                     "overrides",
+                    "list",
                     "--scope",
                     "capacity",
                     "--tenant-id",
@@ -495,6 +510,7 @@ class TenantOverridesCommandTests(unittest.TestCase):
                 [
                     "tenant",
                     "overrides",
+                    "list",
                     "--tenant-id",
                     "tenant-id",
                     "--client-id",
@@ -541,6 +557,7 @@ class TenantOverridesCommandTests(unittest.TestCase):
                 [
                     "tenant",
                     "overrides",
+                    "list",
                     "--scope",
                     "domain",
                     "--tenant-id",
@@ -582,6 +599,7 @@ class TenantOverridesCommandTests(unittest.TestCase):
                 [
                     "tenant",
                     "overrides",
+                    "list",
                     "--scope",
                     "workspace",
                     "--tenant-id",
