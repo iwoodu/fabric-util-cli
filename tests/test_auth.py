@@ -122,6 +122,5 @@ class InteractiveAuthenticationTests(unittest.TestCase):
             prompt="select_account",
         )
 
-
 if __name__ == "__main__":
     unittest.main()

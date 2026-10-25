@@ -75,9 +75,10 @@ secret is created or used.
    listens on a temporary localhost port during sign-in; register `http://localhost`
    without a port.
 3. Under **API permissions**, add **Microsoft Fabric** >
-   **Delegated permissions** > `Tenant.Read.All`. Also add **Power BI Service**
-   > **Delegated permissions** > `Tenant.Read.All` to support capacity listing
-   and capacity-name lookup. Have an administrator grant consent for both.
+   **Delegated permissions** > `Tenant.Read.All`.
+   Also add **Power BI Service** > **Delegated permissions** >
+   `Tenant.Read.All` to support capacity listing and capacity-name lookup.
+   Have an administrator grant consent for these permissions.
 4. Install Python 3.10 or later and fabutil:
 
    ```sh
@@ -152,6 +153,78 @@ pages are fetched automatically. The command requires the signed-in user to be
 a Fabric administrator and the app to have delegated Fabric `Tenant.Read.All`
 permission with admin consent. To resolve a name, the app also needs delegated
 Power BI Service `Tenant.Read.All` permission.
+
+## List refreshable items
+
+List refreshable semantic models across the tenant, or narrow the displayed
+results by workspace and/or capacity:
+
+```sh
+fabutil refreshable list
+fabutil refreshable list --workspace "Finance"
+fabutil refreshable list --capacity "Premium"
+fabutil refreshable list --status Failed
+fabutil refreshable list \
+  --workspace "Finance" \
+  --capacity "Premium" \
+  --status Failed \
+  --time-zone local \
+  --output json
+```
+
+This uses the Power BI Admin [Get Refreshables API](https://learn.microsoft.com/en-us/rest/api/power-bi/admin/get-refreshables),
+which requires the signed-in user to be a Fabric administrator and delegated
+Power BI Service `Tenant.Read.All`. The command requests expanded workspace and
+capacity context. The API documents OData filtering but does not specify
+workspace- or capacity-filter expressions, so `--workspace` and `--capacity`
+filter locally after the full tenant result is paginated. `--status` also
+filters locally by the latest refresh status because server-side support for
+the nested `lastRefresh.status` field is not documented. Supplying multiple
+filters returns items matching all of them. Names and statuses are matched
+case-insensitively; workspace and capacity IDs can also be used.
+
+The API's `RefreshableKind` currently lists only `Dataset` (Power BI semantic
+models). It returns models that have refreshed at least once or have a valid
+refresh schedule; models meeting neither condition are omitted. Reports are
+not refreshed independently, and this endpoint does not include dataflows.
+Power BI retains seven days of refresh history, up to 60 refreshes per model.
+
+The table includes the latest refresh status, start/end time, workspace, and
+capacity. Timestamps default to UTC with a `Z` suffix. `--time-zone local`
+converts timestamps to the computer's local time and includes its UTC offset;
+it applies to table and JSON output.
+
+## List Fabric items
+
+List active items across the tenant, or filter by workspace, capacity, state,
+and/or item type:
+
+```sh
+fabutil item list
+fabutil item list --workspace "Finance"
+fabutil item list --capacity "Premium" --state active
+fabutil item list \
+  --workspace "aaaaaaaa-0000-1111-2222-bbbbbbbbbbbb" \
+  --capacity "a0b1c2d3-e4f5-4678-9012-3456789abcde" \
+  --type Lakehouse --output json
+```
+
+`--workspace` and `--capacity` each accept an ID or an exact name (matched
+without regard to case). Duplicate names are ambiguous; provide an ID instead.
+Capacity names are resolved using the Power BI Admin API, so name lookup also
+requires Power BI Service `Tenant.Read.All`. All filters are sent to the
+Fabric Admin API, and pagination is handled automatically. Item names are
+reported as `displayName` in CLI JSON output.
+
+The command uses Fabric Admin [List Items](https://learn.microsoft.com/en-us/rest/api/fabric/admin/items/list-items),
+which requires the signed-in user to be a Fabric administrator and delegated
+Fabric `Tenant.Read.All` permission with admin consent. The endpoint is in
+Preview, returns active items only, and is not recommended for production
+workloads. Accordingly, `--state` currently accepts only `active`. The API
+returns up to 10,000 items per page and signals rate limiting with HTTP 429 and
+a `Retry-After` header. Item types are passed to the API as-is; Fabric
+validates the type. See the official reference for
+[supported item types](https://learn.microsoft.com/en-us/rest/api/fabric/core/items/list-items#itemtype).
 
 ## Development
 

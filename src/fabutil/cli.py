@@ -1,10 +1,12 @@
 """Command-line entry point."""
 
 import argparse
+import copy
 import json
 import os
 import sys
 from collections.abc import Sequence
+from datetime import datetime, timezone
 from uuid import UUID
 
 import requests
@@ -15,10 +17,17 @@ from fabutil.auth import (
     AuthenticationError,
     acquire_access_token,
 )
-from fabutil.fabric import FabricAPIError, list_capacity_workspaces
+from fabutil.fabric import (
+    FabricAPIError,
+    list_admin_items,
+    list_capacity_workspaces,
+    resolve_admin_workspace_id,
+)
 from fabutil.powerbi import (
     PowerBIAPIError,
+    filter_refreshables,
     list_tenant_capacities,
+    list_tenant_refreshables,
     resolve_capacity_id,
 )
 
@@ -52,6 +61,40 @@ def _build_parser() -> argparse.ArgumentParser:
         default="table",
         help="Output format (default: table).",
     )
+    refreshable_parser = groups.add_parser(
+        "refreshable", help="Manage refreshable Power BI items."
+    )
+    refreshable_commands = refreshable_parser.add_subparsers(
+        dest="command", required=True
+    )
+    list_refreshables_parser = refreshable_commands.add_parser(
+        "list", help="List refreshable items across the tenant."
+    )
+    list_refreshables_parser.add_argument(
+        "--workspace",
+        help="Filter by workspace name or ID.",
+    )
+    list_refreshables_parser.add_argument(
+        "--capacity",
+        help="Filter by capacity name or ID.",
+    )
+    list_refreshables_parser.add_argument(
+        "--status",
+        help="Filter locally by latest refresh status (for example, Completed or Failed).",
+    )
+    list_refreshables_parser.add_argument(
+        "--time-zone",
+        choices=("utc", "local"),
+        default="utc",
+        help="Display timestamps in UTC (default) or the local time zone.",
+    )
+    _add_auth_arguments(list_refreshables_parser)
+    list_refreshables_parser.add_argument(
+        "--output",
+        choices=("table", "json"),
+        default="table",
+        help="Output format (default: table).",
+    )
     workspace_parser = groups.add_parser("workspace", help="Manage workspaces.")
     workspace_commands = workspace_parser.add_subparsers(
         dest="command", required=True
@@ -66,6 +109,36 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_auth_arguments(list_workspaces_parser)
     list_workspaces_parser.add_argument(
+        "--output",
+        choices=("table", "json"),
+        default="table",
+        help="Output format (default: table).",
+    )
+    item_parser = groups.add_parser("item", help="Manage workspace items.")
+    item_commands = item_parser.add_subparsers(dest="command", required=True)
+    list_items_parser = item_commands.add_parser(
+        "list", help="List active items across the tenant."
+    )
+    list_items_parser.add_argument(
+        "--workspace",
+        help="Filter by workspace name or ID.",
+    )
+    list_items_parser.add_argument(
+        "--capacity",
+        help="Filter by capacity name or ID.",
+    )
+    list_items_parser.add_argument(
+        "--state",
+        choices=("active",),
+        help="Filter by item state (the Admin API currently supports active items).",
+    )
+    list_items_parser.add_argument(
+        "--type",
+        dest="item_type",
+        help="Filter by Fabric item type (for example, Lakehouse or Notebook).",
+    )
+    _add_auth_arguments(list_items_parser)
+    list_items_parser.add_argument(
         "--output",
         choices=("table", "json"),
         default="table",
@@ -131,6 +204,121 @@ def _format_workspace_table(workspaces: list[dict[str, object]]) -> str:
     return "\n".join(lines)
 
 
+def _format_item_table(items: list[dict[str, object]]) -> str:
+    columns = (
+        "displayName",
+        "type",
+        "state",
+        "id",
+        "workspaceId",
+        "capacityId",
+    )
+    headers = ("NAME", "TYPE", "STATE", "ID", "WORKSPACE ID", "CAPACITY ID")
+    rows = [
+        [str(item.get(column) or "-") for column in columns]
+        for item in items
+    ]
+    widths = [
+        max([len(header), *(len(row[index]) for row in rows)])
+        for index, header in enumerate(headers)
+    ]
+    lines = [
+        "  ".join(header.ljust(widths[index]) for index, header in enumerate(headers)),
+        "  ".join("-" * width for width in widths),
+    ]
+    lines.extend(
+        "  ".join(value.ljust(widths[index]) for index, value in enumerate(row))
+        for row in rows
+    )
+    return "\n".join(lines)
+
+
+def _format_timestamp(value: object, time_zone: str) -> str:
+    if not isinstance(value, str) or not value:
+        return "-"
+    try:
+        timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    if time_zone == "local":
+        return timestamp.astimezone().isoformat()
+    return timestamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _refreshables_for_output(
+    refreshables: list[dict[str, object]], time_zone: str
+) -> list[dict[str, object]]:
+    result = copy.deepcopy(refreshables)
+    if time_zone == "utc":
+        return result
+
+    def convert_timestamps(value: object) -> None:
+        if isinstance(value, dict):
+            for key, nested_value in value.items():
+                if key in ("startTime", "endTime") and isinstance(
+                    nested_value, str
+                ):
+                    value[key] = _format_timestamp(nested_value, time_zone)
+                else:
+                    convert_timestamps(nested_value)
+        elif isinstance(value, list):
+            for nested_value in value:
+                convert_timestamps(nested_value)
+
+    for refreshable in result:
+        convert_timestamps(refreshable)
+    return result
+
+
+def _format_refreshables_table(
+    refreshables: list[dict[str, object]], time_zone: str
+) -> str:
+    rows = []
+    for refreshable in refreshables:
+        last_refresh = refreshable.get("lastRefresh")
+        last_refresh = last_refresh if isinstance(last_refresh, dict) else {}
+        workspace = refreshable.get("group")
+        workspace = workspace if isinstance(workspace, dict) else {}
+        capacity = refreshable.get("capacity")
+        capacity = capacity if isinstance(capacity, dict) else {}
+        rows.append(
+            [
+                str(refreshable.get("name") or "-"),
+                str(refreshable.get("kind") or "-"),
+                str(last_refresh.get("status") or "-"),
+                _format_timestamp(last_refresh.get("startTime"), time_zone),
+                _format_timestamp(last_refresh.get("endTime"), time_zone),
+                str(workspace.get("name") or "-"),
+                str(capacity.get("displayName") or "-"),
+            ]
+        )
+
+    headers = (
+        "ITEM",
+        "TYPE",
+        "LATEST STATUS",
+        "START TIME",
+        "END TIME",
+        "WORKSPACE",
+        "CAPACITY",
+    )
+    widths = [
+        max([len(header), *(len(row[index]) for row in rows)])
+        for index, header in enumerate(headers)
+    ]
+    lines = [
+        "  ".join(header.ljust(widths[index]) for index, header in enumerate(headers)),
+        "  ".join("-" * width for width in widths),
+    ]
+    lines.extend(
+        "  ".join(value.ljust(widths[index]) for index, value in enumerate(row))
+        for row in rows
+    )
+    return "\n".join(lines)
+
+
 def _print_table(table: str) -> None:
     print(f"\n{table}\n")
 
@@ -150,7 +338,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             capacities = list_tenant_capacities(access_token)
             output_rows = capacities
-        else:
+        elif args.command_group == "workspace":
             try:
                 capacity_id = str(UUID(args.capacity))
             except ValueError:
@@ -163,6 +351,58 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.tenant_id, args.client_id, FABRIC_SCOPE
             )
             workspaces = list_capacity_workspaces(fabric_token, capacity_id)
+        elif args.command_group == "refreshable":
+            access_token = acquire_access_token(
+                args.tenant_id, args.client_id, POWER_BI_SCOPE
+            )
+            refreshables = list_tenant_refreshables(access_token)
+            output_rows = filter_refreshables(
+                refreshables,
+                workspace=args.workspace,
+                capacity=args.capacity,
+                status=args.status,
+            )
+        else:
+            capacity_id = None
+            if args.capacity:
+                try:
+                    capacity_id = str(UUID(args.capacity))
+                except ValueError:
+                    power_bi_token = acquire_access_token(
+                        args.tenant_id, args.client_id, POWER_BI_SCOPE
+                    )
+                    capacity_id = resolve_capacity_id(
+                        power_bi_token, args.capacity
+                    )
+            access_token = acquire_access_token(
+                args.tenant_id, args.client_id, FABRIC_SCOPE
+            )
+            workspace_id = None
+            if args.workspace:
+                try:
+                    workspace_id = str(UUID(args.workspace))
+                except ValueError:
+                    workspace_id = resolve_admin_workspace_id(
+                        access_token, args.workspace, capacity_id
+                    )
+            items = list_admin_items(
+                access_token,
+                workspace_id=workspace_id,
+                capacity_id=capacity_id,
+                state=args.state,
+                item_type=args.item_type,
+            )
+            items = [
+                {
+                    **{key: value for key, value in item.items() if key != "name"},
+                    **(
+                        {"displayName": item["name"]}
+                        if "name" in item
+                        else {}
+                    ),
+                }
+                for item in items
+            ]
     except AuthenticationError as exc:
         print(f"Authentication error: {exc}", file=sys.stderr)
         return 1
@@ -178,11 +418,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command_group == "workspace":
         output_rows = workspaces
+    elif args.command_group == "item":
+        output_rows = items
 
     if args.output == "json":
+        if args.command_group == "refreshable":
+            output_rows = _refreshables_for_output(output_rows, args.time_zone)
         print(json.dumps(output_rows, indent=2))
     elif args.command_group == "workspace":
         _print_table(_format_workspace_table(workspaces))
+    elif args.command_group == "item":
+        _print_table(_format_item_table(items))
+    elif args.command_group == "refreshable":
+        _print_table(_format_refreshables_table(output_rows, args.time_zone))
     else:
         _print_table(_format_table(output_rows))
     return 0
