@@ -20,11 +20,11 @@ fabutil capacity list --output json | jq '[.[] | select(.sku == "PP3" and (.stat
 ## CLI Command Groups
 The following command groups are supported by the CLI.
 
-* [capacity](docs/commands/capacity.md)
-* [item](docs/commands/item.md)
-* [refreshable](docs/commands/refreshable.md)
-* [tenant](docs/commands/tenant.md)
-* [workspace](docs/commands/workspace.md)
+* [capacity](commands/capacity.md)
+* [item](commands/item.md)
+* [refreshable](commands/refreshable.md)
+* [tenant](commands/tenant.md)
+* [workspace](commands/workspace.md)
 
 Usage instructions are available using the `--help` option.
 
