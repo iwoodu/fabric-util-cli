@@ -12,10 +12,17 @@ from uuid import UUID
 import requests
 
 from fabutil.auth import (
+    AZURE_MANAGEMENT_SCOPE,
     FABRIC_SCOPE,
     POWER_BI_SCOPE,
     AuthenticationError,
     acquire_access_token,
+)
+from fabutil.azure import (
+    AzureAPIError,
+    find_capacity_resource,
+    pause_capacity,
+    resume_capacity,
 )
 from fabutil.fabric import (
     FabricAPIError,
@@ -65,6 +72,17 @@ def _build_parser() -> argparse.ArgumentParser:
         default="table",
         help="Output format (default: table).",
     )
+    for action in ("pause", "resume"):
+        action_parser = capacity_commands.add_parser(
+            action,
+            help=f"{action.capitalize()} a capacity.",
+        )
+        action_parser.add_argument(
+            "--capacity",
+            required=True,
+            help="Capacity name or ID.",
+        )
+        _add_auth_arguments(action_parser)
     refreshable_parser = groups.add_parser(
         "refreshable", help="Manage refreshable Power BI items."
     )
@@ -444,12 +462,50 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("provide --client-id or set FABUTIL_CLIENT_ID")
 
     try:
-        if args.command_group == "capacity":
+        if args.command_group == "capacity" and args.command == "list":
             access_token = acquire_access_token(
                 args.tenant_id, args.client_id, POWER_BI_SCOPE
             )
             capacities = list_tenant_capacities(access_token)
             output_rows = capacities
+        elif args.command_group == "capacity":
+            azure_token = acquire_access_token(
+                args.tenant_id, args.client_id, AZURE_MANAGEMENT_SCOPE
+            )
+            capacity_list = None
+            try:
+                UUID(args.capacity)
+            except ValueError:
+                pass
+            else:
+                power_bi_token = acquire_access_token(
+                    args.tenant_id, args.client_id, POWER_BI_SCOPE
+                )
+                capacity_list = list_tenant_capacities(power_bi_token)
+            capacity_resource = find_capacity_resource(
+                azure_token, args.capacity, capacity_list
+            )
+            if args.command == "pause":
+                pause_capacity(
+                    azure_token,
+                    capacity_resource["subscription_id"],
+                    capacity_resource["resource_group"],
+                    capacity_resource["capacity_name"],
+                )
+                action = "pause"
+            else:
+                resume_capacity(
+                    azure_token,
+                    capacity_resource["subscription_id"],
+                    capacity_resource["resource_group"],
+                    capacity_resource["capacity_name"],
+                )
+                action = "resume"
+            print(
+                "Capacity "
+                f"{action} request accepted for {capacity_resource['capacity_name']}."
+            )
+            return 0
         elif args.command_group == "workspace":
             try:
                 capacity_id = str(UUID(args.capacity))
@@ -561,6 +617,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     except FabricAPIError as exc:
         print(f"Fabric API error: {exc}", file=sys.stderr)
+        return 1
+    except AzureAPIError as exc:
+        print(f"Azure API error: {exc}", file=sys.stderr)
         return 1
     except requests.RequestException as exc:
         print(f"Network error communicating with Microsoft APIs: {exc}", file=sys.stderr)

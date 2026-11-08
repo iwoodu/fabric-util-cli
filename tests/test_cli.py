@@ -4,7 +4,11 @@ import json
 import unittest
 from unittest.mock import Mock, call, patch
 
-from fabutil.auth import FABRIC_SCOPE, POWER_BI_SCOPE
+from fabutil.auth import (
+    AZURE_MANAGEMENT_SCOPE,
+    FABRIC_SCOPE,
+    POWER_BI_SCOPE,
+)
 from fabutil.cli import (
     _build_parser,
     _format_refreshables_table,
@@ -14,6 +18,7 @@ from fabutil.cli import (
 
 
 CAPACITY_ID = "a0b1c2d3-e4f5-4678-9012-3456789abcde"
+SUBSCRIPTION_ID = "c0b1c2d3-e4f5-4678-9012-3456789abcde"
 
 
 class TenantCommandParserTests(unittest.TestCase):
@@ -78,6 +83,126 @@ class CapacityListCommandTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertTrue(stdout.getvalue().startswith("\nNAME"))
         self.assertTrue(stdout.getvalue().endswith("\n\n"))
+
+
+class CapacityActionCommandTests(unittest.TestCase):
+    def test_capacity_actions_do_not_require_subscription_or_resource_group(
+        self,
+    ) -> None:
+        parser = _build_parser()
+
+        for action in ("pause", "resume"):
+            with self.subTest(action=action):
+                args = parser.parse_args(
+                    [
+                        "capacity",
+                        action,
+                        "--capacity",
+                        "Finance",
+                        "--tenant-id",
+                        "tenant-id",
+                        "--client-id",
+                        "client-id",
+                    ]
+                )
+                self.assertEqual(args.command, action)
+                self.assertFalse(hasattr(args, "subscription"))
+                self.assertFalse(hasattr(args, "resource_group"))
+
+    @patch("fabutil.cli.pause_capacity")
+    @patch("fabutil.cli.find_capacity_resource")
+    @patch(
+        "fabutil.cli.list_tenant_capacities",
+        return_value=[{"id": CAPACITY_ID, "displayName": "Finance"}],
+    )
+    @patch(
+        "fabutil.cli.acquire_access_token",
+        side_effect=["azure-token", "powerbi-token"],
+    )
+    def test_pauses_capacity_by_id(
+        self,
+        acquire_token: Mock,
+        list_tenant_capacities: Mock,
+        find_capacity: Mock,
+        pause: Mock,
+    ) -> None:
+        find_capacity.return_value = {
+            "subscription_id": SUBSCRIPTION_ID,
+            "resource_group": "rg",
+            "capacity_name": "finance",
+        }
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            result = main(
+                [
+                    "capacity",
+                    "pause",
+                    "--capacity",
+                    CAPACITY_ID,
+                    "--tenant-id",
+                    "tenant-id",
+                    "--client-id",
+                    "client-id",
+                ]
+            )
+
+        self.assertEqual(result, 0)
+        self.assertIn("finance", stdout.getvalue())
+        self.assertEqual(
+            acquire_token.call_args_list,
+            [
+                call("tenant-id", "client-id", AZURE_MANAGEMENT_SCOPE),
+                call("tenant-id", "client-id", POWER_BI_SCOPE),
+            ],
+        )
+        list_tenant_capacities.assert_called_once_with("powerbi-token")
+        find_capacity.assert_called_once_with(
+            "azure-token", CAPACITY_ID, [{"id": CAPACITY_ID, "displayName": "Finance"}]
+        )
+        pause.assert_called_once_with(
+            "azure-token", SUBSCRIPTION_ID, "rg", "finance"
+        )
+
+    @patch("fabutil.cli.resume_capacity")
+    @patch("fabutil.cli.find_capacity_resource")
+    @patch("fabutil.cli.acquire_access_token", return_value="azure-token")
+    def test_resumes_capacity_by_name(
+        self,
+        acquire_token: Mock,
+        find_capacity: Mock,
+        resume: Mock,
+    ) -> None:
+        find_capacity.return_value = {
+            "subscription_id": SUBSCRIPTION_ID,
+            "resource_group": "rg",
+            "capacity_name": "finance",
+        }
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            result = main(
+                [
+                    "capacity",
+                    "resume",
+                    "--capacity",
+                    "Finance",
+                    "--tenant-id",
+                    "tenant-id",
+                    "--client-id",
+                    "client-id",
+                ]
+            )
+
+        self.assertEqual(result, 0)
+        self.assertIn("finance", stdout.getvalue())
+        acquire_token.assert_called_once_with(
+            "tenant-id", "client-id", AZURE_MANAGEMENT_SCOPE
+        )
+        find_capacity.assert_called_once_with("azure-token", "Finance", None)
+        resume.assert_called_once_with(
+            "azure-token", SUBSCRIPTION_ID, "rg", "finance"
+        )
 
 
 class WorkspaceListCommandTests(unittest.TestCase):

@@ -13,6 +13,7 @@ class AuthenticationError(Exception):
 
 POWER_BI_SCOPE = "https://analysis.windows.net/powerbi/api/Tenant.Read.All"
 FABRIC_SCOPE = "https://api.fabric.microsoft.com/Tenant.Read.All"
+AZURE_MANAGEMENT_SCOPE = "https://management.azure.com/user_impersonation"
 
 
 def _create_token_cache() -> PersistedTokenCache:
